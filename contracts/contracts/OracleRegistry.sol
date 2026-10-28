@@ -11,7 +11,7 @@ import "./CropBatchNFT.sol";
 /**
  * @title OracleRegistry
  * @author AgriChain Core Engineering Team
- * @notice Decentralized registry and cryptographic verification bridge for off-chain AI crop quality oracles.
+ * @notice Decentralized registry and cryptographic verification bridge for off-chain AI fruit quality oracles.
  * @dev Enforces economic security via AGRI token staking bonds. Validates ECDSA cryptographic signatures
  *      before updating on-chain CropBatchNFT state. Features governance-triggered slashing for fraudulent or disputed ratings.
  */

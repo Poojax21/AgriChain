@@ -11,11 +11,10 @@ class OracleSigner:
     keccak256(abi.encodePacked(chainId, oracleRegistryAddress, tokenId, grade, confidenceScore, reportHash))
     """
     def __init__(self, private_key: str = None):
-        # Default to standard hardhat test oracle key if none provided
-        self.private_key = private_key or os.getenv(
-            "ORACLE_PRIVATE_KEY",
-            "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-        )
+        # Signing is disabled unless an operator supplies a local dev/test key.
+        self.private_key = private_key or os.getenv("ORACLE_PRIVATE_KEY")
+        if not self.private_key:
+            raise RuntimeError("ORACLE_PRIVATE_KEY must be configured in the local environment")
         self.account = Account.from_key(self.private_key)
         self.address = self.account.address
 

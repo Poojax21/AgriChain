@@ -1,128 +1,147 @@
 import React from 'react';
-import { Sprout, ShieldCheck, Wallet, RefreshCw, Award, Scale, Cpu, Settings, ShoppingBag } from 'lucide-react';
+import { Wallet, Bell } from 'lucide-react';
+import type { WalletRole } from '../web3/wallet';
 
 interface NavbarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
+  viewMode: 'buyer' | 'farmer';
+  setViewMode: (m: 'buyer' | 'farmer') => void;
   walletAddress: string | null;
+  displayName: string | null;
+  verified: boolean;
   agriBalance: string;
   reputationScore: number;
+  cartCount: number;
+  unreadNotificationsCount?: number;
+  networkOk: boolean;
+  roles: WalletRole[];
   onConnectWallet: () => void;
   onClaimFaucet: () => void;
+  onOpenNotifications?: () => void;
   isFauceting: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
   setCurrentTab,
+  viewMode,
+  setViewMode,
   walletAddress,
+  displayName,
+  verified,
   agriBalance,
   reputationScore,
+  cartCount,
+  unreadNotificationsCount,
+  networkOk,
+  roles,
   onConnectWallet,
   onClaimFaucet,
+  onOpenNotifications,
   isFauceting,
 }) => {
-  const tabs = [
-    { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag },
-    { id: 'farmer', label: 'Farmer Portal', icon: Sprout },
-    { id: 'oracle', label: 'AI Oracle', icon: Cpu },
-    { id: 'juror', label: 'Dispute DAO', icon: Scale },
-    { id: 'admin', label: 'Governance', icon: Settings },
-  ];
+  const tabs = viewMode === 'farmer'
+    ? [
+        { id: 'marketplace', label: 'Market' },
+        { id: 'farmer', label: 'Sell' },
+        { id: 'shipments', label: 'Ship' },
+        { id: 'wallet', label: 'Wallet' },
+        { id: 'oracle', label: 'Oracle' },
+        { id: 'juror', label: 'DAO' },
+        { id: 'audit', label: 'Audit' },
+        { id: 'admin', label: 'Gov' },
+      ]
+    : [
+        { id: 'marketplace', label: 'Market' },
+        { id: 'wallet', label: 'Wallet' },
+        { id: 'juror', label: 'DAO' },
+        { id: 'audit', label: 'Audit' },
+        { id: 'admin', label: 'Gov' },
+      ];
+
+  const go = (id: string) => {
+    setCurrentTab(id);
+    window.scrollTo({ top: 0 });
+  };
 
   return (
-    <header className="glass-panel" style={{ margin: '16px 24px', padding: '12px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-        
-        {/* Logo & Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }} onClick={() => setCurrentTab('marketplace')}>
-          <div style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, #10b981 0%, #047857 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)'
-          }}>
-            <Sprout size={24} color="#fff" />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
-                Agri<span style={{ color: 'var(--primary)' }}>Chain</span>
+    <header className="ed-nav">
+      <div className="ed-logo" onClick={() => go('marketplace')} style={{ cursor: 'pointer' }}>
+        -AgriChain
+      </div>
+
+      <nav className="ed-pill" aria-label="Interface mode">
+        <button
+          className={viewMode === 'buyer' ? 'active' : ''}
+          onClick={() => setViewMode('buyer')}
+          title="Buyer interface: browse, buy, receive, dispute"
+        >
+          Buyer
+        </button>
+        <button
+          className={viewMode === 'farmer' ? 'active' : ''}
+          onClick={() => setViewMode('farmer')}
+          title="Farmer interface: verify, mint, list, ship"
+        >
+          Farmer
+        </button>
+      </nav>
+
+      <nav className="ed-pill">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            className={currentTab === t.id ? 'active' : ''}
+            onClick={() => go(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        {onOpenNotifications && (
+          <button className="ed-cart" onClick={onOpenNotifications} title="Activity & Notifications">
+            <Bell size={14} />
+            {unreadNotificationsCount !== undefined && unreadNotificationsCount > 0 && (
+              <span className="ed-cart-badge" style={{ background: '#0284c7' }}>{unreadNotificationsCount}</span>
+            )}
+          </button>
+        )}
+        <button className="ed-cart" onClick={() => go('marketplace')} title="Orders / Cart">
+          Cart
+          <span className="ed-cart-badge">{cartCount}</span>
+        </button>
+        {walletAddress ? (
+          <>
+            {!networkOk && (
+              <span className="ed-cart" style={{ background: '#7f1d1d', color: '#fefae0', borderColor: '#7f1d1d' }}>
+                Wrong Network
               </span>
-              <span className="badge badge-grade-a" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-                Polygon L2
+            )}
+            {roles.slice(0, 2).map((r) => (
+              <span key={r} className="ed-cart" style={{ padding: '8px 12px' }} title={`Detected role: ${r}`}>
+                {r}
               </span>
-            </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Decentralized Agriculture & AI Verification
-            </p>
-          </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = currentTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                className={`nav-tab ${isActive ? 'active' : ''}`}
-                onClick={() => setCurrentTab(tab.id)}
-              >
-                <Icon size={16} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* User Stats & Wallet */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          {walletAddress ? (
-            <>
-              {/* Soulbound Reputation Pill */}
-              <div className="badge badge-neutral" style={{ padding: '6px 12px', gap: '6px' }} title="Soulbound Trust Score">
-                <Award size={14} color="#f59e0b" />
-                <span style={{ color: 'var(--text-secondary)' }}>Trust:</span>
-                <strong style={{ color: '#fff' }}>{reputationScore}</strong>
-              </div>
-
-              {/* AGRI Token Balance */}
-              <div className="badge badge-neutral" style={{ padding: '6px 12px', gap: '6px' }} title="AGRI Token Balance">
-                <span style={{ color: 'var(--primary)', fontWeight: 700 }}>AGRI:</span>
-                <strong style={{ color: '#fff' }}>{parseFloat(agriBalance).toLocaleString()}</strong>
-              </div>
-
-              {/* Faucet Button */}
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={onClaimFaucet}
-                disabled={isFauceting}
-                title="Claim 1,000 AGRI from demo faucet"
-              >
-                <RefreshCw size={13} className={isFauceting ? 'animate-spin' : ''} />
-                {isFauceting ? 'Claiming...' : 'Faucet'}
-              </button>
-
-              {/* Wallet Address Chip */}
-              <div className="btn btn-secondary btn-sm" style={{ cursor: 'default' }}>
-                <Wallet size={14} color="var(--primary)" />
-                <span className="font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
-              </div>
-            </>
-          ) : (
-            <button className="btn btn-primary" onClick={onConnectWallet}>
-              <Wallet size={16} />
-              Connect Wallet
+            ))}
+            <button
+              className="ed-cart"
+              onClick={() => go('wallet')}
+              title={`AGRI ${agriBalance} | Trust ${reputationScore}`}
+            >
+              <Wallet size={14} />
+              {isFauceting ? '...' : displayName ? `${displayName}${verified ? ' ✓' : ''}` : `${walletAddress!.slice(0, 4)}..${walletAddress!.slice(-2)}`}
             </button>
-          )}
-        </div>
-
+            <button className="ed-cart" onClick={onClaimFaucet} title="Claim 1,000 AGRI faucet">
+              {isFauceting ? '...' : '+Faucet'}
+            </button>
+          </>
+        ) : (
+          <button className="ed-cart" onClick={onConnectWallet}>
+            <Wallet size={14} /> Connect
+          </button>
+        )}
       </div>
     </header>
   );

@@ -3,8 +3,8 @@ const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("AgriMarketplace", function () {
-  let AgriToken, CropBatchNFT, ReputationSBT, AgriMarketplace;
-  let agriToken, cropBatchNFT, reputationSBT, marketplace;
+  let AgriToken, CropBatchNFT, ReputationSBT, AgriMarketplace, SupplyChainTracker, OracleRegistry, DisputeDAO;
+  let agriToken, cropBatchNFT, reputationSBT, marketplace, tracker, oracleRegistry, disputeDAOContract;
   let admin, feeRecipient, farmer, buyer, dao, unauthorized;
 
   const initialSupply = ethers.parseEther("1000000");
@@ -40,6 +40,20 @@ describe("AgriMarketplace", function () {
       await reputationSBT.getAddress()
     );
     await marketplace.waitForDeployment();
+
+    OracleRegistry = await ethers.getContractFactory("OracleRegistry");
+    oracleRegistry = await OracleRegistry.deploy(admin.address, await agriToken.getAddress(), await cropBatchNFT.getAddress());
+    await oracleRegistry.waitForDeployment();
+    DisputeDAO = await ethers.getContractFactory("DisputeDAO");
+    disputeDAOContract = await DisputeDAO.deploy(admin.address, await agriToken.getAddress(), await marketplace.getAddress(), await oracleRegistry.getAddress(), await reputationSBT.getAddress());
+    await disputeDAOContract.waitForDeployment();
+    await marketplace.setDisputeDAO(await disputeDAOContract.getAddress());
+    await marketplace.grantRole(await marketplace.DAO_ROLE(), await disputeDAOContract.getAddress());
+
+    SupplyChainTracker = await ethers.getContractFactory("SupplyChainTracker");
+    tracker = await SupplyChainTracker.deploy(admin.address, await cropBatchNFT.getAddress(), await marketplace.getAddress());
+    await tracker.waitForDeployment();
+    await marketplace.setSupplyChainTracker(await tracker.getAddress());
 
     // Grant DAO_ROLE to dao signer
     const daoRole = await marketplace.DAO_ROLE();
@@ -175,13 +189,34 @@ describe("AgriMarketplace", function () {
       expect(order.status).to.equal(1); // SHIPPED
     });
 
+    it("Should allow buyer to mark physical receipt, starting the freshness clock", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      await expect(marketplace.connect(buyer).markReceived(1n))
+        .to.emit(marketplace, "OrderReceived");
+
+      const order = await marketplace.getOrder(1n);
+      expect(order.status).to.equal(6); // RECEIVED (appended, existing values untouched)
+      expect(order.receivedAt).to.be.gt(0);
+    });
+
+    it("Should revert markReceived from non-buyer or wrong state", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      await expect(marketplace.connect(farmer).markReceived(1n))
+        .to.be.revertedWithCustomError(marketplace, "NotOrderBuyer");
+      await expect(marketplace.connect(buyer).markReceived(999n))
+        .to.be.revertedWithCustomError(marketplace, "OrderNotShipped");
+    });
+
     it("Should release escrow and transfer NFT upon buyer delivery confirmation", async function () {
       await marketplace.connect(farmer).shipOrder(1n);
 
       const farmerBalanceBefore = await agriToken.balanceOf(farmer.address);
       const feeRecipientBefore = await agriToken.balanceOf(feeRecipient.address);
 
-      await expect(marketplace.connect(buyer).confirmDelivery(1n))
+      const deliveryLeaf = ethers.keccak256(ethers.toUtf8Bytes("delivery checkpoint"));
+      await tracker.submitCheckpointRoot(1n, deliveryLeaf, "");
+      await tracker.submitDeliveryCheckpoint(1n, deliveryLeaf, []);
+      await expect(marketplace.connect(buyer).confirmDelivery(1n, deliveryLeaf, []))
         .to.emit(marketplace, "OrderDelivered")
         .withArgs(1n, expectedPayout, expectedFee);
 
@@ -198,13 +233,28 @@ describe("AgriMarketplace", function () {
       expect(farmerTrades).to.equal(1n);
     });
 
+    it("Should confirm delivery from RECEIVED state as well", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      await marketplace.connect(buyer).markReceived(1n);
+      const deliveryLeaf = ethers.keccak256(ethers.toUtf8Bytes("delivery checkpoint"));
+      await tracker.submitCheckpointRoot(1n, deliveryLeaf, "");
+      await tracker.submitDeliveryCheckpoint(1n, deliveryLeaf, []);
+      await expect(marketplace.connect(buyer).confirmDelivery(1n, deliveryLeaf, []))
+        .to.emit(marketplace, "OrderDelivered");
+      expect((await marketplace.getOrder(1n)).status).to.equal(2); // DELIVERED
+    });
+
     it("Should allow auto-release of funds to farmer after timeout", async function () {
       await marketplace.connect(farmer).shipOrder(1n);
+      await marketplace.connect(buyer).markReceived(1n);
+      const deliveryLeaf = ethers.keccak256(ethers.toUtf8Bytes("delivery checkpoint"));
+      await tracker.submitCheckpointRoot(1n, deliveryLeaf, "");
+      await tracker.submitDeliveryCheckpoint(1n, deliveryLeaf, []);
 
       // Advance time past 3-day timeout
       await time.increase(3 * 24 * 3600 + 10);
 
-      await expect(marketplace.autoReleaseAfterTimeout(1n))
+      await expect(marketplace.autoReleaseAfterTimeout(1n, deliveryLeaf, []))
         .to.emit(marketplace, "AutoReleased")
         .withArgs(1n, expectedPayout);
 
@@ -215,9 +265,49 @@ describe("AgriMarketplace", function () {
 
     it("Should revert auto-release if timeout has not elapsed", async function () {
       await marketplace.connect(farmer).shipOrder(1n);
+      await marketplace.connect(buyer).markReceived(1n);
+      const deliveryLeaf = ethers.keccak256(ethers.toUtf8Bytes("delivery checkpoint"));
+      await tracker.submitCheckpointRoot(1n, deliveryLeaf, "");
+      await tracker.submitDeliveryCheckpoint(1n, deliveryLeaf, []);
       await expect(
-        marketplace.autoReleaseAfterTimeout(1n)
+        marketplace.autoReleaseAfterTimeout(1n, deliveryLeaf, [])
       ).to.be.revertedWithCustomError(marketplace, "TimeoutNotElapsed");
+    });
+
+    it("Should revert auto-release when buyer never marked receipt, even after 3 days", async function () {
+      // Perishables must not auto-release while the box sits unopened.
+      await marketplace.connect(farmer).shipOrder(1n);
+      const deliveryLeaf = ethers.keccak256(ethers.toUtf8Bytes("delivery checkpoint"));
+      await tracker.submitCheckpointRoot(1n, deliveryLeaf, "");
+      await tracker.submitDeliveryCheckpoint(1n, deliveryLeaf, []);
+      await time.increase(3 * 24 * 3600 + 10);
+      await expect(marketplace.autoReleaseAfterTimeout(1n, deliveryLeaf, []))
+        .to.be.revertedWithCustomError(marketplace, "OrderNotReceived");
+    });
+
+    it("must not release delivery escrow without an included checkpoint proof", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      const leaf = ethers.keccak256(ethers.toUtf8Bytes("uncommitted delivery"));
+      await expect(marketplace.connect(buyer).confirmDelivery(1n, leaf, []))
+        .to.be.revertedWithCustomError(marketplace, "DeliveryProofRequired");
+    });
+
+    it("must require logistics to designate the proven leaf as delivery", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      const leaf = ethers.keccak256(ethers.toUtf8Bytes("committed transit checkpoint"));
+      await tracker.submitCheckpointRoot(1n, leaf, "");
+      await expect(marketplace.connect(buyer).confirmDelivery(1n, leaf, []))
+        .to.be.revertedWithCustomError(marketplace, "DeliveryProofRequired");
+    });
+
+    it("timeout cannot settle without the logistics-designated delivery proof", async function () {
+      await marketplace.connect(farmer).shipOrder(1n);
+      await marketplace.connect(buyer).markReceived(1n);
+      const leaf = ethers.keccak256(ethers.toUtf8Bytes("committed but not designated"));
+      await tracker.submitCheckpointRoot(1n, leaf, "");
+      await time.increase(3 * 24 * 3600 + 10);
+      await expect(marketplace.autoReleaseAfterTimeout(1n, leaf, []))
+        .to.be.revertedWithCustomError(marketplace, "DeliveryProofRequired");
     });
   });
 
@@ -234,7 +324,7 @@ describe("AgriMarketplace", function () {
     });
 
     it("Should freeze escrow when buyer raises dispute", async function () {
-      await expect(marketplace.connect(buyer).raiseDispute(1n, reasonHash))
+      await expect(marketplace.connect(buyer).raiseDispute(1n, reasonHash, ethers.ZeroAddress))
         .to.emit(marketplace, "DisputeRaised")
         .withArgs(1n, buyer.address, reasonHash);
 
@@ -242,8 +332,22 @@ describe("AgriMarketplace", function () {
       expect(order.status).to.equal(3); // DISPUTED
     });
 
+    it("Should allow dispute after buyer marked receipt (opened box was rotten)", async function () {
+      await marketplace.connect(buyer).markReceived(1n);
+      await expect(marketplace.connect(buyer).raiseDispute(1n, reasonHash, ethers.ZeroAddress))
+        .to.emit(marketplace, "DisputeRaised");
+      expect((await marketplace.getOrder(1n)).status).to.equal(3); // DISPUTED
+    });
+
+    it("rolls back the escrow freeze if DAO case creation fails", async function () {
+      await marketplace.setDisputeDAO(await tracker.getAddress());
+      await expect(marketplace.connect(buyer).raiseDispute(1n, reasonHash, ethers.ZeroAddress)).to.be.reverted;
+      const order = await marketplace.getOrder(1n);
+      expect(order.status).to.equal(1); // Still SHIPPED; no ambiguous frozen order.
+    });
+
     it("Should execute DAO verdict refunding buyer and returning NFT to farmer", async function () {
-      await marketplace.connect(buyer).raiseDispute(1n, reasonHash);
+      await marketplace.connect(buyer).raiseDispute(1n, reasonHash, ethers.ZeroAddress);
 
       const buyerBalanceBefore = await agriToken.balanceOf(buyer.address);
 

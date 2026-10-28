@@ -1,7 +1,7 @@
 {
   "name": "agrichain-monorepo",
   "version": "1.0.0",
-  "description": "AgriChain: Blockchain-Based Smart Agriculture Marketplace with AI-Based Crop Quality Verification",
+  "description": "AgriChain: Blockchain-Based Smart Agriculture Marketplace with AI-Based Fruit Quality Verification",
   "private": true,
   "workspaces": [
     "contracts",
@@ -12,7 +12,9 @@
     "contracts:compile": "npm run compile --workspace=contracts",
     "contracts:test": "npm run test --workspace=contracts",
     "contracts:coverage": "npm run coverage --workspace=contracts",
+    "chain:local": "npm run node:local --workspace=contracts",
     "contracts:deploy:local": "npm run deploy:local --workspace=contracts",
+    "contracts:seed:demo": "npm run seed:demo --workspace=contracts",
     "backend:dev": "npm run dev --workspace=backend",
     "backend:test": "npm run test --workspace=backend",
     "frontend:dev": "npm run dev --workspace=frontend",
@@ -29,5 +31,19 @@
     "marketplace"
   ],
   "author": "AgriChain Team",
-  "license": "MIT"
+  "license": "MIT",
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "keccak@3.0.4": true,
+    "keccak@3.0.2": true,
+    "secp256k1@4.0.5": true,
+    "secp256k1@4.0.3": true,
+    "leveldown@6.1.0": true,
+    "@trufflesuite/bigint-buffer@1.1.10": true,
+    "sqlite3@5.1.7": true,
+    "bufferutil@4.0.7": true,
+    "bufferutil@4.0.5": true,
+    "utf-8-validate@6.0.3": true,
+    "utf-8-validate@5.0.7": true
+  }
 }

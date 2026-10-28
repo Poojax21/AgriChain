@@ -114,6 +114,8 @@ describe("AgriChain Full End-to-End User Journeys", function () {
       await marketplace.getAddress()
     );
     await tracker.waitForDeployment();
+    await marketplace.setDisputeDAO(await disputeDAO.getAddress());
+    await marketplace.setSupplyChainTracker(await tracker.getAddress());
 
     // Configure Permissions
     await (await cropBatchNFT.grantRole(await cropBatchNFT.ORACLE_ROLE(), await oracleRegistry.getAddress())).wait();
@@ -207,6 +209,12 @@ describe("AgriChain Full End-to-End User Journeys", function () {
     await marketplace.connect(farmer).shipOrder(orderId);
     console.log(`  [Step 8] Farmer marked Order #${orderId} as SHIPPED.`);
 
+    // 8b. Buyer confirms physical receipt (starts the freshness clock)
+    await expect(marketplace.connect(buyer).markReceived(orderId))
+      .to.emit(marketplace, "OrderReceived");
+    expect((await marketplace.getOrder(orderId)).status).to.equal(6); // RECEIVED
+    console.log(`  [Step 8b] Buyer marked Order #${orderId} as RECEIVED.`);
+
     // 9. Logistics carrier records checkpoints via Merkle Root
     const checkpoints = [
       { loc: "Karnal Farm Gate", time: 1718001000, temp: 220, note: "Loaded" },
@@ -219,19 +227,20 @@ describe("AgriChain Full End-to-End User Journeys", function () {
     );
     const tree = buildMerkleTree(leaves);
     await tracker.connect(carrier).submitCheckpointRoot(orderId, tree.root, "QmTransitBatchLogs");
+    await tracker.connect(carrier).submitDeliveryCheckpoint(orderId, leaves[3], tree.getProof(3));
     console.log(`  [Step 9] Carrier committed 4 transit checkpoints as Merkle Root: ${tree.root.slice(0, 18)}...`);
 
     // 10. Buyer independently verifies cold chain checkpoint with cryptographic proof
-    const sampleProof = tree.getProof(1); // Delhi NCR checkpoint
-    const isProven = await tracker.verifyCheckpoint.staticCall(orderId, leaves[1], sampleProof);
+    const sampleProof = tree.getProof(3); // delivery terminal checkpoint
+    const isProven = await tracker.verifyCheckpoint.staticCall(orderId, leaves[3], sampleProof);
     expect(isProven).to.be.true;
-    console.log(`  [Step 10] Cryptographic Merkle inclusion proof verified for cold-chain checkpoint!`);
+    console.log(`  [Step 10] Delivery checkpoint inclusion proof verified and designated on-chain!`);
 
     // 11. Buyer confirms delivery -> funds release
     const farmerBalanceBefore = await agriToken.balanceOf(farmer.address);
     const feeRecipientBefore = await agriToken.balanceOf(feeRecipient.address);
 
-    await marketplace.connect(buyer).confirmDelivery(orderId);
+    await marketplace.connect(buyer).confirmDelivery(orderId, leaves[3], sampleProof);
 
     const expectedFee = (totalCost * 200n) / 10000n; // 2% = 200 AGRI
     const expectedPayout = totalCost - expectedFee; // 9,800 AGRI
@@ -290,11 +299,11 @@ describe("AgriChain Full End-to-End User Journeys", function () {
 
     // Buyer receives spoiled produce -> raises dispute
     const disputeEvidenceHash = ethers.keccak256(ethers.toUtf8Bytes("Photos of rotten tomatoes on arrival"));
-    await marketplace.connect(buyer).raiseDispute(orderId, disputeEvidenceHash);
+    await marketplace.connect(buyer).raiseDispute(orderId, disputeEvidenceHash, oracleNode.address);
+    expect((await disputeDAO.disputes(1n)).orderId).to.equal(orderId);
     console.log(`  [Dispute] Buyer raised dispute on Order #${orderId} with photographic evidence hash.`);
 
-    // Open dispute in DAO
-    await disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, disputeEvidenceHash);
+    // Escrow freeze and DAO case creation occur in the same marketplace transaction.
     const disputeId = 1n;
     console.log(`  [Dispute] Case registered in DisputeDAO (Dispute ID: ${disputeId}).`);
 

@@ -31,10 +31,18 @@ ai-service/.venv/
 ai-service/models/*.pth
 ai-service/models/*.pt
 ai-service/models/*.onnx
+ai-service/data/
+!ai-service/models/fruitnet_mobilenet_v3_small.pth
+!ai-service/models/fruitnet_metrics.json
 
 # Database
-backend/*.sqlite
-backend/*.db
+backend/*.sqlite*
+backend/*.db*
+contracts/.ganache-db/
+
+# Uploaded evidence and photos
+backend/dispute-evidence/
+backend/listing-images/
 
 # OS Files
 .DS_Store

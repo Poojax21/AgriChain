@@ -34,6 +34,8 @@ contract SupplyChainTracker is AccessControl {
 
     /// @notice Mapping from order ID to committed Merkle root of batched checkpoints.
     mapping(uint256 => bytes32) public orderCheckpointRoots;
+    /// @notice Logistics-designated delivery leaf, proven against the order's committed root.
+    mapping(uint256 => bytes32) public deliveryCheckpointLeaves;
 
     /// @notice Mapping from order ID to IPFS CID storing the complete checkpoint leaf dataset.
     mapping(uint256 => string) public orderBatchIPFSCID;
@@ -70,6 +72,8 @@ contract SupplyChainTracker is AccessControl {
 
     /// @notice Custom error thrown when proof verification fails.
     error CheckpointProofInvalid(uint256 orderId, bytes32 leaf);
+    error CheckpointRootAlreadyCommitted(uint256 orderId);
+    error DeliveryCheckpointAlreadySubmitted(uint256 orderId);
 
     /**
      * @notice Initializes the SupplyChainTracker contract.
@@ -110,6 +114,10 @@ contract SupplyChainTracker is AccessControl {
             revert InvalidMerkleRoot();
         }
 
+        if (orderCheckpointRoots[orderId] != bytes32(0)) {
+            revert CheckpointRootAlreadyCommitted(orderId);
+        }
+
         orderCheckpointRoots[orderId] = merkleRoot;
         orderBatchIPFSCID[orderId] = ipfsBatchCID;
 
@@ -136,14 +144,40 @@ contract SupplyChainTracker is AccessControl {
         bytes32 leaf,
         bytes32[] calldata proof
     ) external returns (bool isValid) {
-        bytes32 root = orderCheckpointRoots[orderId];
-        if (root == bytes32(0)) {
-            return false;
-        }
-
-        isValid = MerkleProof.verify(proof, root, leaf);
+        isValid = isCheckpointValid(orderId, leaf, proof);
         emit CheckpointVerified(orderId, leaf, isValid);
         return isValid;
+    }
+
+    /// @notice Read-only proof check used by escrow before delivery settlement.
+    function isCheckpointValid(
+        uint256 orderId,
+        bytes32 leaf,
+        bytes32[] calldata proof
+    ) public view returns (bool) {
+        bytes32 root = orderCheckpointRoots[orderId];
+        return root != bytes32(0) && MerkleProof.verify(proof, root, leaf);
+    }
+
+    /// @notice Logistics explicitly designates a checkpoint as delivery and proves it is in the committed batch.
+    function submitDeliveryCheckpoint(
+        uint256 orderId,
+        bytes32 leaf,
+        bytes32[] calldata proof
+    ) external onlyRole(LOGISTICS_ROLE) {
+        if (deliveryCheckpointLeaves[orderId] != bytes32(0)) revert DeliveryCheckpointAlreadySubmitted(orderId);
+        if (!isCheckpointValid(orderId, leaf, proof)) revert CheckpointProofInvalid(orderId, leaf);
+        deliveryCheckpointLeaves[orderId] = leaf;
+        emit CheckpointVerified(orderId, leaf, true);
+    }
+
+    /// @notice Escrow uses this to require the logistics-designated delivery leaf, not any transit checkpoint.
+    function isDeliveryProofValid(
+        uint256 orderId,
+        bytes32 leaf,
+        bytes32[] calldata proof
+    ) external view returns (bool) {
+        return deliveryCheckpointLeaves[orderId] == leaf && isCheckpointValid(orderId, leaf, proof);
     }
 
     /**

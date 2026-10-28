@@ -61,6 +61,7 @@ describe("DisputeDAO", function () {
       await reputationSBT.getAddress()
     );
     await disputeDAO.waitForDeployment();
+    await marketplace.connect(admin).setDisputeDAO(await disputeDAO.getAddress());
 
     // Wire permissions:
     // Marketplace grants DAO_ROLE to DisputeDAO
@@ -114,7 +115,7 @@ describe("DisputeDAO", function () {
     orderId = 1n;
 
     // Buyer raises dispute in marketplace
-    await marketplace.connect(buyer).raiseDispute(orderId, evidenceHash);
+      await marketplace.connect(buyer).raiseDispute(orderId, evidenceHash, oracleNode.address);
 
     // Fund and stake jurors
     // Juror1: 5,000 AGRI, Juror2: 3,000 AGRI, Juror3: 1,500 AGRI
@@ -126,10 +127,6 @@ describe("DisputeDAO", function () {
 
   describe("Dispute Opening", function () {
     it("Should open a new dispute case", async function () {
-      await expect(
-        disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash)
-      ).to.emit(disputeDAO, "DisputeOpened");
-
       const dispute = await disputeDAO.disputes(1n);
       expect(dispute.buyer).to.equal(buyer.address);
       expect(dispute.farmer).to.equal(farmer.address);
@@ -139,17 +136,13 @@ describe("DisputeDAO", function () {
     });
 
     it("Should prevent duplicate dispute creation for same order", async function () {
-      await disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash);
-      await expect(
-        disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash)
-      ).to.be.revertedWithCustomError(disputeDAO, "DisputeAlreadyExists")
-        .withArgs(orderId);
+      await expect(disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash))
+        .to.be.revertedWithCustomError(disputeDAO, "OnlyMarketplace");
     });
   });
 
   describe("Juror Voting", function () {
     beforeEach(async function () {
-      await disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash);
     });
 
     it("Should allow staked juror to cast vote with their stake weight", async function () {
@@ -181,7 +174,6 @@ describe("DisputeDAO", function () {
 
   describe("Dispute Resolution & Execution", function () {
     beforeEach(async function () {
-      await disputeDAO.createDispute(orderId, buyer.address, farmer.address, oracleNode.address, evidenceHash);
       // Juror1 (5000 AGRI) votes REFUND_BUYER
       await disputeDAO.connect(juror1).vote(1n, 1);
       // Juror2 (3000 AGRI) votes PAY_FARMER

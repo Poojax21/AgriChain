@@ -139,6 +139,16 @@ describe("CropBatchNFT (ERC-721)", function () {
       expect(batch.isVerified).to.be.true;
     });
 
+    it("Should make the first oracle quality result immutable", async function () {
+      await cropBatchNFT.connect(oracle).setQualityResult(1n, 1, 9500, reportHash);
+      await expect(cropBatchNFT.connect(oracle).setQualityResult(
+        1n, 4, 9900, ethers.keccak256(ethers.toUtf8Bytes("ReplacementReport"))
+      )).to.be.revertedWithCustomError(cropBatchNFT, "VerificationAlreadySubmitted");
+      const batch = await cropBatchNFT.getBatch(1n);
+      expect(batch.qualityGrade).to.equal(1);
+      expect(batch.reportHash).to.equal(reportHash);
+    });
+
     it("Should revert if non-oracle attempts to update quality", async function () {
       const oracleRole = await cropBatchNFT.ORACLE_ROLE();
       await expect(

@@ -208,7 +208,7 @@ describe("SupplyChainTracker & Merkle Gas Benchmarks", function () {
       console.log("======================================================\n");
 
       // Verify that Merkle batching provides significant gas efficiency (> 70% savings)
-      expect(merkleGasUsed).to.be.lt(directTotalGas / 2n);
+      expect(merkleGasUsed < directTotalGas / 2n).to.be.true;
     });
   });
 });

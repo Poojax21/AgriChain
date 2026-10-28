@@ -1,11 +1,14 @@
+const env = (import.meta as any).env || {};
+const pick = (key: string, fallback: string) => (env[key] as string) || fallback;
+
 export const CONTRACT_ADDRESSES = {
-  AgriToken: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  CropBatchNFT: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  ReputationSBT: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-  OracleRegistry: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-  AgriMarketplace: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-  DisputeDAO: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-  SupplyChainTracker: "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+  AgriToken: pick('VITE_AGRI_TOKEN_ADDRESS', "0x5FbDB2315678afecb367f032d93F642f64180aa3"),
+  CropBatchNFT: pick('VITE_CROP_BATCH_NFT_ADDRESS', "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"),
+  ReputationSBT: pick('VITE_REPUTATION_SBT_ADDRESS', "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"),
+  OracleRegistry: pick('VITE_ORACLE_REGISTRY_ADDRESS', "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"),
+  AgriMarketplace: pick('VITE_AGRI_MARKETPLACE_ADDRESS', "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"),
+  DisputeDAO: pick('VITE_DISPUTE_DAO_ADDRESS', "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"),
+  SupplyChainTracker: pick('VITE_SUPPLY_CHAIN_TRACKER_ADDRESS', "0x0165878A594ca255338adfa4d48449f69242Eb8F")
 };
 
 export const AGRI_TOKEN_ABI = [
@@ -53,6 +56,7 @@ export const ORACLE_REGISTRY_ABI = [
   "function oracleNodes(address) view returns (bool isWhitelisted, bool isActive, uint256 stakedAmount, uint256 verificationsCount, uint256 slashedCount, uint256 totalSlashedAmount, uint256 registeredAt)",
   "function whitelistOracle(address oracleNode)",
   "function stakeBond(uint256 amount)",
+  "function unstakeBond(uint256 amount)",
   "function submitVerification(uint256 tokenId, uint8 grade, uint16 confidenceScore, bytes32 reportHash, bytes signature)",
   "event QualityVerified(uint256 indexed tokenId, address indexed oracleNode, uint8 grade, uint16 confidenceScore, bytes32 reportHash)"
 ];
@@ -60,16 +64,20 @@ export const ORACLE_REGISTRY_ABI = [
 export const AGRI_MARKETPLACE_ABI = [
   "function platformFeeBps() view returns (uint256)",
   "function listings(uint256) view returns (uint256 listingId, uint256 tokenId, address farmer, uint256 pricePerUnit, uint256 availableQuantity, uint8 minQualityGrade, uint8 status, uint256 createdAt)",
-  "function getOrder(uint256 orderId) view returns (tuple(uint256 orderId, uint256 listingId, uint256 tokenId, address buyer, address farmer, uint256 quantity, uint256 totalAmount, uint256 platformFee, uint8 status, uint256 placedAt, uint256 shippedAt, uint256 deliveredAt, bytes32 disputeReasonHash))",
+  "function getOrder(uint256 orderId) view returns (tuple(uint256 orderId, uint256 listingId, uint256 tokenId, address buyer, address farmer, uint256 quantity, uint256 totalAmount, uint256 platformFee, uint8 status, uint256 placedAt, uint256 shippedAt, uint256 receivedAt, uint256 deliveredAt, bytes32 disputeReasonHash))",
+  "function markReceived(uint256 orderId)",
   "function createListing(uint256 tokenId, uint256 pricePerUnit, uint8 minQualityGrade) returns (uint256)",
   "function cancelListing(uint256 listingId)",
   "function placeOrder(uint256 listingId, uint256 quantity) returns (uint256)",
   "function shipOrder(uint256 orderId)",
-  "function confirmDelivery(uint256 orderId)",
-  "function raiseDispute(uint256 orderId, bytes32 reasonHash)",
-  "function autoReleaseAfterTimeout(uint256 orderId)",
+  "function confirmDelivery(uint256 orderId, bytes32 deliveryLeaf, bytes32[] proof)",
+  "function raiseDispute(uint256 orderId, bytes32 reasonHash, address oracleNode)",
+  "function autoReleaseAfterTimeout(uint256 orderId, bytes32 deliveryLeaf, bytes32[] proof)",
+  "function setDisputeDAO(address dao)",
+  "function setSupplyChainTracker(address tracker)",
   "event ListingCreated(uint256 indexed listingId, uint256 indexed tokenId, address indexed farmer, uint256 pricePerUnit, uint256 quantity, uint8 minGrade)",
   "event OrderPlaced(uint256 indexed orderId, uint256 indexed listingId, uint256 indexed tokenId, address buyer, address farmer, uint256 quantity, uint256 escrowAmount)",
+  "event OrderReceived(uint256 indexed orderId, uint256 receivedAt)",
   "event OrderDelivered(uint256 indexed orderId, uint256 payoutToFarmer, uint256 platformFee)",
   "event DisputeRaised(uint256 indexed orderId, address indexed raisedBy, bytes32 reasonHash)"
 ];
@@ -86,9 +94,48 @@ export const DISPUTE_DAO_ABI = [
 ];
 
 export const SUPPLY_CHAIN_TRACKER_ABI = [
+  "function LOGISTICS_ROLE() view returns (bytes32)",
+  "function grantRole(bytes32 role, address account)",
   "function orderCheckpointRoots(uint256) view returns (bytes32)",
+  "function deliveryCheckpointLeaves(uint256) view returns (bytes32)",
   "function submitCheckpointRoot(uint256 orderId, bytes32 merkleRoot, string ipfsBatchCID)",
+  "function submitDeliveryCheckpoint(uint256 orderId, bytes32 leaf, bytes32[] proof)",
+  "function isDeliveryProofValid(uint256 orderId, bytes32 leaf, bytes32[] proof) view returns (bool)",
   "function verifyCheckpoint(uint256 orderId, bytes32 leaf, bytes32[] proof) returns (bool)",
+  "function isCheckpointValid(uint256 orderId, bytes32 leaf, bytes32[] proof) view returns (bool)",
   "event CheckpointRootCommitted(uint256 indexed orderId, bytes32 indexed merkleRoot, string ipfsBatchCID, address indexed submittedBy)",
   "event CheckpointVerified(uint256 indexed orderId, bytes32 indexed leaf, bool isValid)"
 ];
+
+export const SUPPORTED_CHAIN_ID = Number(pick('VITE_CHAIN_ID', '31337'));
+export const SUPPORTED_NETWORKS: Record<number, { chainIdHex: string; chainName: string; rpcUrls: string[]; nativeCurrency: { name: string; symbol: string; decimals: number } }> = {
+  31337: {
+    chainIdHex: '0x7A69',
+    chainName: 'Hardhat Local',
+    rpcUrls: ['http://127.0.0.1:8545'],
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  },
+  80002: {
+    chainIdHex: '0x13882',
+    chainName: 'Polygon Amoy',
+    rpcUrls: ['https://rpc-amoy.polygon.technology'],
+    nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+  },
+};
+
+export const BACKEND_URL = pick('VITE_BACKEND_URL', 'http://localhost:5000');
+export const AI_SERVICE_URL = pick('VITE_AI_SERVICE_URL', 'http://127.0.0.1:8001');
+export const RPC_URL = pick('VITE_RPC_URL', 'http://127.0.0.1:8545');
+
+export const ERC721_BALANCE_ABI = ["function balanceOf(address owner) view returns (uint256)"];
+export const ERC721_APPROVE_ABI = [
+  "function approve(address to, uint256 tokenId)",
+  "function getApproved(uint256 tokenId) view returns (address)",
+  "function setApprovalForAll(address operator, bool approved)",
+];
+export const ACCESS_CONTROL_ABI = [
+  "function hasRole(bytes32 role, address account) view returns (bool)",
+  "function DEFAULT_ADMIN_ROLE() view returns (bytes32)",
+  "function grantRole(bytes32 role, address account)",
+];
+export const MINTER_ROLE_HASH = '0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6';

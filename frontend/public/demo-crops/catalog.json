@@ -1,0 +1,14 @@
+{
+  "dataset": "FruitNet: Indian fruits image dataset with quality",
+  "datasetURL": "https://doi.org/10.17632/b6fftwbr2v.3",
+  "mirrorLicense": "CC BY-SA 4.0",
+  "notice": "Real photographs and quality labels are from FruitNet. These are local demonstration listings, not live farm offers. Prices and quantities are test values.",
+  "items": [
+    { "cropType": "Apple", "variety": "FruitNet sample", "quantity": 800, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "1.80", "image": "apple-good.jpg", "sourceQualityLabel": "Good", "description": "Real apple photograph from the FruitNet quality dataset." },
+    { "cropType": "Banana", "variety": "FruitNet sample", "quantity": 1200, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "1.20", "image": "banana-mixed.jpg", "sourceQualityLabel": "Mixed", "description": "Real banana photograph from the FruitNet quality dataset." },
+    { "cropType": "Guava", "variety": "FruitNet sample", "quantity": 500, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "2.00", "image": "guava-bad.jpg", "sourceQualityLabel": "Bad", "description": "Real guava photograph from the FruitNet quality dataset." },
+    { "cropType": "Lime", "variety": "FruitNet sample", "quantity": 900, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "0.90", "image": "lime-good.jpg", "sourceQualityLabel": "Good", "description": "Real lime photograph from the FruitNet quality dataset." },
+    { "cropType": "Orange", "variety": "FruitNet sample", "quantity": 1100, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "1.50", "image": "orange-mixed.jpg", "sourceQualityLabel": "Mixed", "description": "Real orange photograph from the FruitNet quality dataset." },
+    { "cropType": "Pomegranate", "variety": "FruitNet sample", "quantity": 400, "unit": "kg", "farmLocation": "FruitNet dataset sample · India", "pricePerUnitAGRI": "3.20", "image": "pomegranate-bad.jpg", "sourceQualityLabel": "Bad", "description": "Real pomegranate photograph from the FruitNet quality dataset." }
+  ]
+}

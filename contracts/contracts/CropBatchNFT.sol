@@ -81,6 +81,7 @@ contract CropBatchNFT is ERC721URIStorage, AccessControl {
 
     /// @notice Error thrown when confidence score exceeds 10,000 basis points.
     error InvalidConfidenceScore(uint16 confidenceScore);
+    error VerificationAlreadySubmitted(uint256 tokenId);
 
     /**
      * @notice Initializes the CropBatchNFT contract with roles.
@@ -166,6 +167,9 @@ contract CropBatchNFT is ERC721URIStorage, AccessControl {
         }
 
         BatchMetadata storage batch = _batches[tokenId];
+        if (batch.isVerified) {
+            revert VerificationAlreadySubmitted(tokenId);
+        }
         batch.qualityGrade = grade;
         batch.confidenceScore = confidenceScore;
         batch.reportHash = reportHash;

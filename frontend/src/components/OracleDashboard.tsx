@@ -1,54 +1,47 @@
 import React, { useState } from 'react';
 import { Cpu, ShieldCheck, Key, AlertTriangle, Layers, ArrowUpRight, CheckCircle2 } from 'lucide-react';
+import { BACKEND_URL, CONTRACT_ADDRESSES } from '../contracts';
 
 interface OracleDashboardProps {
   walletAddress: string | null;
+  oracleProfile: { whitelisted: boolean; active: boolean; staked: string } | null;
   onStakeOracleBond: (amount: string) => Promise<void>;
 }
 
 export const OracleDashboard: React.FC<OracleDashboardProps> = ({
   walletAddress,
+  oracleProfile,
   onStakeOracleBond,
 }) => {
   const [stakeAmount, setStakeAmount] = useState('5000');
   const [isStaking, setIsStaking] = useState(false);
 
   // Inspection Studio State
-  const [selectedSample, setSelectedSample] = useState<'apples' | 'wheat' | 'rice' | 'tomatoes'>('rice');
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [cropType, setCropType] = useState('Apple');
   const [inspectionResult, setInspectionResult] = useState<any>(null);
   const [isInspecting, setIsInspecting] = useState(false);
 
-  const sampleImages = {
-    rice: { name: 'Basmati Rice Lot #01', url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&auto=format&fit=crop&q=80', simulatedGrade: 1, label: 'Grade A (97.8%)' },
-    apples: { name: 'Himachal Apples #02', url: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=600&auto=format&fit=crop&q=80', simulatedGrade: 1, label: 'Grade A (96.5%)' },
-    wheat: { name: 'Durum Wheat #03', url: 'https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?w=600&auto=format&fit=crop&q=80', simulatedGrade: 2, label: 'Grade B (91.2%)' },
-    tomatoes: { name: 'Defective Tomatoes #04', url: 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=600&auto=format&fit=crop&q=80', simulatedGrade: 4, label: 'Rejected (94.0%)' },
-  };
-
   const handleRunStudioInspection = async () => {
     setIsInspecting(true);
+    setInspectionResult(null);
     try {
-      const sample = sampleImages[selectedSample];
-      const res = await fetch('http://localhost:5000/api/ai/verify', {
+      if (!selectedImage) throw new Error('Select an image first.');
+      const form = new FormData();
+      form.append('image', selectedImage);
+      form.append('tokenId', '0');
+      form.append('cropType', cropType);
+      form.append('chainId', '31337');
+      form.append('registryAddress', CONTRACT_ADDRESSES.OracleRegistry);
+      const res = await fetch(`${BACKEND_URL}/api/ai/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tokenId: 1,
-          cropType: sample.name,
-          chainId: 31337,
-        }),
+        body: form,
       });
       const data = await res.json();
-      setInspectionResult(data);
+      setInspectionResult(res.ok ? data : { isFallback: true, error: data.error || data.detail || 'Image inspection failed.' });
     } catch (e) {
-      setInspectionResult({
-        grade: sampleImages[selectedSample].simulatedGrade,
-        gradeName: sampleImages[selectedSample].simulatedGrade === 1 ? 'GRADE_A' : sampleImages[selectedSample].simulatedGrade === 2 ? 'GRADE_B' : 'REJECTED',
-        confidencePercent: 96.5,
-        reportHash: '0x8f3c7a21bc9e4401876e9a7852c00321aaef10927c3d4e8b912a78fbc31a0e42',
-        signature: '0x59a117b4c8d9e0f1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b',
-        metrics: { freshnessIndex: 92.4, blemishRatio: 0.04, estimatedShelfLifeDays: 9 }
-      });
+      // No fake signature: inspection studio is read-only without ai-service.
+      setInspectionResult({ error: 'AI service unreachable. Start ai-service on :8001.', isFallback: true });
     } finally {
       setIsInspecting(false);
     }
@@ -67,23 +60,25 @@ export const OracleDashboard: React.FC<OracleDashboardProps> = ({
                 Decentralized Oracle Node
               </span>
             </div>
-            <h2 style={{ fontSize: '1.8rem', color: '#fff' }}>AI Verification & Staking Security</h2>
+            <h2 style={{ fontSize: '1.8rem', color: '#01472e' }}>AI Verification & Staking Security</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '6px' }}>
               Oracles must stake a minimum bond of 5,000 AGRI tokens. Fraudulent or disputed ratings are slashed by the DAO.
+              Grading runs on the oracle server — the signing key never leaves it. The browser only relays the signed
+              report, and the contract accepts it only from a whitelisted, bonded oracle.
             </p>
           </div>
 
           <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px 20px', borderRadius: '12px' }}>
+            <div style={{ background: 'rgba(1,71,46,0.06)', padding: '16px 20px', borderRadius: '12px' }}>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Node Status</p>
-              <span className="badge badge-grade-a" style={{ marginTop: '4px' }}>
-                <CheckCircle2 size={12} /> Active & Bonded
+              <span className={`badge ${oracleProfile?.active ? 'badge-grade-a' : 'badge-grade-c'}`} style={{ marginTop: '4px' }}>
+                <CheckCircle2 size={12} /> {oracleProfile?.active ? 'Active & Bonded' : oracleProfile?.whitelisted ? 'Whitelisted; bond required' : 'Not whitelisted'}
               </span>
             </div>
 
-            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px 20px', borderRadius: '12px' }}>
+            <div style={{ background: 'rgba(1,71,46,0.06)', padding: '16px 20px', borderRadius: '12px' }}>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Minimum Required Bond</p>
-              <strong style={{ color: '#fff', fontSize: '1.2rem' }}>5,000 AGRI</strong>
+              <strong style={{ color: '#01472e', fontSize: '1.2rem' }}>5,000 AGRI</strong>
             </div>
           </div>
         </div>
@@ -93,7 +88,7 @@ export const OracleDashboard: React.FC<OracleDashboardProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Key size={16} color="var(--primary)" />
             <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
-              Node Signer: <code className="font-mono" style={{ color: '#fff' }}>0x59c6...690d</code>
+              Connected wallet oracle status: <code className="font-mono" style={{ color: '#01472e' }}>{walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : 'not connected'}</code> · {oracleProfile?.staked || '0'} AGRI staked
             </span>
           </div>
 
@@ -125,61 +120,37 @@ export const OracleDashboard: React.FC<OracleDashboardProps> = ({
 
       {/* Live Inspection Studio */}
       <div className="glass-panel" style={{ padding: '32px' }}>
-        <h3 style={{ fontSize: '1.4rem', color: '#fff', marginBottom: '8px' }}>
+        <h3 style={{ fontSize: '1.4rem', color: '#01472e', marginBottom: '8px' }}>
           AI Quality Inspection Studio
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '24px' }}>
-          Inspect visual batches in real time using the MobileNetV2 CNN classifier and OpenCV defect segmentation engine.
+          Upload an image for a FruitNet-trained model preview. This token ID 0 preview does not verify an NFT; farmer verification is signed against the actual minted batch ID.
         </p>
 
-        {/* Sample Selection */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '28px' }}>
-          {(Object.keys(sampleImages) as Array<keyof typeof sampleImages>).map((key) => {
-            const sample = sampleImages[key];
-            const isSelected = selectedSample === key;
-            return (
-              <div
-                key={key}
-                onClick={() => {
-                  setSelectedSample(key);
-                  setInspectionResult(null);
-                }}
-                style={{
-                  border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  cursor: 'pointer',
-                  background: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <img src={sample.url} alt={sample.name} style={{ width: '100%', height: '110px', objectFit: 'cover' }} />
-                <div style={{ padding: '12px' }}>
-                  <strong style={{ fontSize: '0.9rem', color: '#fff', display: 'block' }}>{sample.name}</strong>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sample.label}</span>
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <select className="form-input" style={{ maxWidth: '280px' }} value={cropType} onChange={(e) => setCropType(e.target.value)} aria-label="Fruit type">
+            {['Apple', 'Banana', 'Guava', 'Lime', 'Orange', 'Pomegranate', 'Mango', 'Tomato', 'Potato', 'Strawberry', 'Bellpepper', 'Cucumber', 'Carrot', 'Wheat', 'Rice', 'Maize', 'Other'].map((crop) => <option key={crop}>{crop}</option>)}
+          </select>
+          <input className="form-input" style={{ maxWidth: '360px' }} type="file" accept="image/*" onChange={(e) => { setSelectedImage(e.target.files?.[0] || null); setInspectionResult(null); }} />
         </div>
 
         <button
           className="btn btn-primary"
           onClick={handleRunStudioInspection}
-          disabled={isInspecting}
+          disabled={isInspecting || !selectedImage}
           style={{ marginBottom: '24px' }}
         >
-          {isInspecting ? 'Running CNN Feature Analysis...' : 'Evaluate Selected Batch'}
+          {isInspecting ? 'Analyzing uploaded image…' : 'Preview image grade'}
         </button>
 
         {/* Results Panel */}
-        {inspectionResult && (
-          <div style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '24px' }}>
+        {inspectionResult && !inspectionResult.isFallback && (
+          <div style={{ background: 'rgba(233,237,201,1)', border: '1px solid var(--border-subtle)', borderRadius: '16px', padding: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Classification Result</span>
-                <h4 style={{ fontSize: '1.4rem', color: '#fff', marginTop: '2px' }}>
-                  {sampleImages[selectedSample].name}
+                <h4 style={{ fontSize: '1.4rem', color: '#01472e', marginTop: '2px' }}>
+                  {cropType}
                 </h4>
               </div>
               <div>
@@ -187,29 +158,29 @@ export const OracleDashboard: React.FC<OracleDashboardProps> = ({
                   inspectionResult.grade === 1 ? 'badge-grade-a' :
                   inspectionResult.grade === 2 ? 'badge-grade-b' : 'badge-rejected'
                 }`} style={{ fontSize: '1rem', padding: '6px 14px' }}>
-                  {inspectionResult.gradeName} ({inspectionResult.confidencePercent || 96.5}%)
+                  {inspectionResult.qualityLabel} · {inspectionResult.gradingMethod === 'heuristic-screening' ? 'rule-based screening' : 'uncalibrated model score'} {inspectionResult.confidencePercent}%
                 </span>
               </div>
             </div>
 
             {/* Metrics Breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '14px', borderRadius: '10px' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Freshness Index</span>
-                <h5 style={{ color: '#fff', fontSize: '1.2rem', marginTop: '4px' }}>
-                  {inspectionResult.metrics?.freshnessIndex || 92.4}/100
+              <div style={{ background: 'rgba(1,71,46,0.06)', padding: '14px', borderRadius: '10px' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Model</span>
+                <h5 style={{ color: '#01472e', fontSize: '1.2rem', marginTop: '4px' }}>
+                  MobileNetV3-Small
                 </h5>
               </div>
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '14px', borderRadius: '10px' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Surface Blemishes</span>
-                <h5 style={{ color: '#fff', fontSize: '1.2rem', marginTop: '4px' }}>
-                  {((inspectionResult.metrics?.blemishRatio || 0.04) * 100).toFixed(1)}%
+              <div style={{ background: 'rgba(1,71,46,0.06)', padding: '14px', borderRadius: '10px' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Training photos</span>
+                <h5 style={{ color: '#01472e', fontSize: '1.2rem', marginTop: '4px' }}>
+                  {inspectionResult.report?.metrics?.datasetImageCount ?? inspectionResult.datasetImageCount ?? 'FruitNet'}
                 </h5>
               </div>
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '14px', borderRadius: '10px' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Estimated Shelf Life</span>
-                <h5 style={{ color: '#fff', fontSize: '1.2rem', marginTop: '4px' }}>
-                  {inspectionResult.metrics?.estimatedShelfLifeDays || 8} Days
+              <div style={{ background: 'rgba(1,71,46,0.06)', padding: '14px', borderRadius: '10px' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Held-out test accuracy</span>
+                <h5 style={{ color: '#01472e', fontSize: '1.2rem', marginTop: '4px' }}>
+                  {inspectionResult.report?.metrics?.heldOutTestAccuracy != null ? `${(inspectionResult.report.metrics.heldOutTestAccuracy * 100).toFixed(1)}%` : '—'}
                 </h5>
               </div>
             </div>
@@ -224,12 +195,17 @@ export const OracleDashboard: React.FC<OracleDashboardProps> = ({
               </code>
 
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '12px', marginBottom: '6px' }}>
-                EIP-191 Cryptographic Oracle Signature:
+                Signature is generated for preview token ID 0 and is not a valid NFT verification:
               </p>
               <code className="font-mono" style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'block', wordBreak: 'break-all' }}>
-                {inspectionResult.signature}
+                Not for submission
               </code>
             </div>
+          </div>
+        )}
+        {inspectionResult?.isFallback && (
+          <div style={{ background: 'rgba(180,35,35,0.07)', border: '1px solid rgba(180,35,35,0.3)', borderRadius: '16px', padding: '24px' }}>
+            <p style={{ color: '#8f1d1d', fontSize: '0.9rem' }}>{inspectionResult.error || 'Image inspection failed. No grade is shown.'}</p>
           </div>
         )}
       </div>

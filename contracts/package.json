@@ -7,7 +7,10 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "coverage": "hardhat coverage",
+    "node:local": "hardhat node --hostname 127.0.0.1 --port 8545",
+    "chain:persistent": "node ganache-server.js",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "seed:demo": "hardhat run scripts/seed-demo-catalog.js --network localhost",
     "deploy:amoy": "hardhat run scripts/deploy.js --network amoy"
   },
   "dependencies": {
@@ -16,6 +19,7 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "ganache": "^7.9.2",
     "hardhat": "^2.22.5"
   }
 }

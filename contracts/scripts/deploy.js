@@ -1,4 +1,5 @@
 const { ethers } = require("hardhat");
+const { Wallet } = require("ethers");
 const fs = require("fs");
 const path = require("path");
 
@@ -92,6 +93,25 @@ async function main() {
   await supplyChainTracker.waitForDeployment();
   const supplyChainTrackerAddress = await supplyChainTracker.getAddress();
   console.log(`      SupplyChainTracker deployed to: ${supplyChainTrackerAddress}\n`);
+
+  // Marketplace integrations are wired after all contracts exist to avoid a
+  // constructor deployment cycle. Disputes and delivery proof are then atomic gates.
+  await (await marketplace.setDisputeDAO(disputeDAOAddress)).wait();
+  await (await marketplace.setSupplyChainTracker(supplyChainTrackerAddress)).wait();
+
+  // Local-only acceptance-test setup: if the AI signer is configured, whitelist
+  // and bond that disposable wallet with TEST AGRI so the signed grade can be
+  // accepted without requiring a third MetaMask account or real funds.
+  if (Number(network.chainId) === 31337 && process.env.ORACLE_PRIVATE_KEY) {
+    const oracleWallet = new Wallet(process.env.ORACLE_PRIVATE_KEY, ethers.provider);
+    await (await oracleRegistry.whitelistOracle(oracleWallet.address)).wait();
+    const testBond = ethers.parseEther("5000");
+    await (await agriToken.mint(oracleWallet.address, testBond)).wait();
+    const oracleToken = agriToken.connect(oracleWallet);
+    await (await oracleToken.approve(oracleRegistryAddress, testBond)).wait();
+    await (await oracleRegistry.connect(oracleWallet).stakeBond(testBond)).wait();
+    console.log(`  - Whitelisted and bonded local AI signer ${oracleWallet.address} with 5,000 TEST AGRI`);
+  }
 
   // Wire permissions across contracts
   console.log("Configuring Cross-Contract Access Roles...");

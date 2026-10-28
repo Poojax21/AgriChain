@@ -8,6 +8,15 @@ import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "./CropBatchNFT.sol";
 import "./ReputationSBT.sol";
 
+interface IAgriShipmentTracker {
+    function orderCheckpointRoots(uint256 orderId) external view returns (bytes32);
+    function isDeliveryProofValid(uint256 orderId, bytes32 leaf, bytes32[] calldata proof) external view returns (bool);
+}
+
+interface IAgriDisputeDAO {
+    function createDispute(uint256 orderId, address buyer, address farmer, address oracleNode, bytes32 evidenceHash) external returns (uint256);
+}
+
 /**
  * @title AgriMarketplace
  * @author AgriChain Core Engineering Team
@@ -25,7 +34,10 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     /// @notice Platform fee (200 basis points = 2.00%).
     uint256 public platformFeeBps = 200;
 
-    /// @notice Auto-release timeout: 3 days after shipping if buyer is unresponsive.
+    /// @notice Auto-release timeout: 3 days after the buyer marks physical receipt.
+    /// @dev Perishable goods rot in transit/at the door, so the clock must NOT
+    ///      run from shipment. It starts only when the buyer confirms the goods
+    ///      are in hand (markReceived). Until then no timeout release is possible.
     uint256 public autoReleaseTimeout = 3 days;
 
     /// @notice Address collecting platform fees.
@@ -39,6 +51,8 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
 
     /// @notice Reference to ReputationSBT contract.
     ReputationSBT public immutable reputationSBT;
+    IAgriShipmentTracker public supplyChainTracker;
+    IAgriDisputeDAO public disputeDAO;
 
     /// @notice Listing lifecycle states.
     enum ListingStatus {
@@ -48,13 +62,16 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     }
 
     /// @notice Order escrow lifecycle states.
+    /// @dev RECEIVED is appended last (value 6) so existing numeric statuses
+    ///      0-5 never shift for indexers and clients.
     enum OrderStatus {
         PLACED,
         SHIPPED,
         DELIVERED,
         DISPUTED,
         RESOLVED,
-        CANCELLED
+        CANCELLED,
+        RECEIVED
     }
 
     /// @notice Marketplace listing structure.
@@ -82,6 +99,7 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
         OrderStatus status;
         uint256 placedAt;
         uint256 shippedAt;
+        uint256 receivedAt;
         uint256 deliveredAt;
         bytes32 disputeReasonHash;
     }
@@ -128,6 +146,11 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     /// @notice Emitted when the farmer ships the crop batch.
     event OrderShipped(uint256 indexed orderId, uint256 shippedAt);
 
+    /// @notice Emitted when the buyer confirms physical receipt of the goods.
+    /// @dev Starts the freshness/auto-release clock. Distinct from delivery
+    ///      confirmation (which also releases escrow immediately).
+    event OrderReceived(uint256 indexed orderId, uint256 receivedAt);
+
     /// @notice Emitted when buyer confirms delivery and escrow funds are released to farmer.
     event OrderDelivered(uint256 indexed orderId, uint256 payoutToFarmer, uint256 platformFee);
 
@@ -152,12 +175,15 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     error BelowRequiredQuality(CropBatchNFT.QualityGrade actualGrade, CropBatchNFT.QualityGrade requiredGrade);
     error InvalidPriceOrQuantity();
     error OrderNotShipped(uint256 orderId);
+    error OrderNotReceived(uint256 orderId);
     error OrderNotPlaced(uint256 orderId);
     error OrderNotInDisputableState(uint256 orderId);
     error NotOrderBuyer(uint256 orderId, address caller);
     error NotOrderFarmer(uint256 orderId, address caller);
     error TimeoutNotElapsed(uint256 currentTimestamp, uint256 releaseTimestamp);
     error InvalidSettlementAmounts(uint256 totalAttempted, uint256 escrowAmount);
+    error DeliveryProofRequired(uint256 orderId);
+    error InvalidContractAddress();
 
     /**
      * @notice Initializes the AgriMarketplace contract.
@@ -269,7 +295,10 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
         if (listing.status != ListingStatus.ACTIVE) {
             revert ListingNotActive(listingId);
         }
-        if (quantity == 0 || quantity > listing.availableQuantity) {
+        // The batch is represented by one indivisible ERC-721. Partial orders
+        // would transfer the whole crop NFT to the first buyer while leaving
+        // an impossible remainder listed, so require whole-batch purchase.
+        if (quantity == 0 || quantity != listing.availableQuantity) {
             revert InvalidPriceOrQuantity();
         }
 
@@ -292,6 +321,7 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
             status: OrderStatus.PLACED,
             placedAt: block.timestamp,
             shippedAt: 0,
+            receivedAt: 0,
             deliveredAt: 0,
             disputeReasonHash: bytes32(0)
         });
@@ -325,11 +355,14 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     }
 
     /**
-     * @notice Confirms receipt and satisfactory delivery, releasing escrow funds to the farmer.
-     * @dev Transfers CropBatchNFT to buyer, pays farmer (minus platform fee), and boosts reputations.
+     * @notice Buyer confirms physical receipt of the goods.
+     * @dev Starts the auto-release freshness clock. The buyer can still inspect
+     *      and either confirmDelivery (immediate release) or raiseDispute.
+     *      Perishables must not auto-release while the box sits unopened, so
+     *      this attestation — not shipment — is the timeout anchor.
      * @param orderId Identifier of the order.
      */
-    function confirmDelivery(uint256 orderId) external nonReentrant {
+    function markReceived(uint256 orderId) external {
         Order storage order = orders[orderId];
         if (order.status != OrderStatus.SHIPPED) {
             revert OrderNotShipped(orderId);
@@ -338,26 +371,61 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
             revert NotOrderBuyer(orderId, msg.sender);
         }
 
+        order.status = OrderStatus.RECEIVED;
+        order.receivedAt = block.timestamp;
+
+        emit OrderReceived(orderId, block.timestamp);
+    }
+
+    /**
+     * @notice Confirms receipt and satisfactory delivery, releasing escrow funds to the farmer.
+     * @dev Transfers CropBatchNFT to buyer, pays farmer (minus platform fee), and boosts reputations.
+     * @param orderId Identifier of the order.
+     */
+    function confirmDelivery(uint256 orderId, bytes32 deliveryLeaf, bytes32[] calldata proof) external nonReentrant {
+        Order storage order = orders[orderId];
+        if (order.status != OrderStatus.SHIPPED && order.status != OrderStatus.RECEIVED) {
+            revert OrderNotShipped(orderId);
+        }
+        if (order.buyer != msg.sender) {
+            revert NotOrderBuyer(orderId, msg.sender);
+        }
+        _requireDeliveryProof(orderId, deliveryLeaf, proof);
+
         _finalizeSuccessfulDelivery(orderId);
     }
 
     /**
-     * @notice Automatically releases escrow to the farmer if buyer does not confirm or dispute within timeout.
+     * @notice Automatically releases escrow to the farmer if buyer goes silent AFTER confirming receipt.
+     * @dev Timeout runs from receivedAt, never from shippedAt: fruit left on a porch
+     *      must not trigger payment. Disputes remain possible until release executes.
      * @param orderId Identifier of the order.
      */
-    function autoReleaseAfterTimeout(uint256 orderId) external nonReentrant {
+    function autoReleaseAfterTimeout(uint256 orderId, bytes32 deliveryLeaf, bytes32[] calldata proof) external nonReentrant {
         Order storage order = orders[orderId];
-        if (order.status != OrderStatus.SHIPPED) {
-            revert OrderNotShipped(orderId);
+        if (order.status != OrderStatus.RECEIVED) {
+            revert OrderNotReceived(orderId);
         }
 
-        uint256 releaseTime = order.shippedAt + autoReleaseTimeout;
+        uint256 releaseTime = order.receivedAt + autoReleaseTimeout;
         if (block.timestamp < releaseTime) {
             revert TimeoutNotElapsed(block.timestamp, releaseTime);
         }
 
+        // Timeout is only a buyer-inactivity fallback. It cannot bypass the
+        // same committed-checkpoint inclusion proof required for confirmation.
+        _requireDeliveryProof(orderId, deliveryLeaf, proof);
+
         emit AutoReleased(orderId, order.totalAmount - order.platformFee);
         _finalizeSuccessfulDelivery(orderId);
+    }
+
+    function _requireDeliveryProof(uint256 orderId, bytes32 leaf, bytes32[] calldata proof) internal view {
+        IAgriShipmentTracker tracker = supplyChainTracker;
+        if (address(tracker) == address(0) || tracker.orderCheckpointRoots(orderId) == bytes32(0) ||
+            !tracker.isDeliveryProofValid(orderId, leaf, proof)) {
+            revert DeliveryProofRequired(orderId);
+        }
     }
 
     /**
@@ -393,11 +461,11 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
     /**
      * @notice Freezes escrow and escalates order to DisputeDAO.
      * @param orderId Identifier of the order.
-     * @param reasonHash keccak256 hash of dispute claim and photo evidence on IPFS.
+     * @param reasonHash keccak256 hash of the dispute claim text; evidence files are off-chain.
      */
-    function raiseDispute(uint256 orderId, bytes32 reasonHash) external nonReentrant {
+    function raiseDispute(uint256 orderId, bytes32 reasonHash, address oracleNode) external nonReentrant {
         Order storage order = orders[orderId];
-        if (order.status != OrderStatus.PLACED && order.status != OrderStatus.SHIPPED) {
+        if (order.status != OrderStatus.PLACED && order.status != OrderStatus.SHIPPED && order.status != OrderStatus.RECEIVED) {
             revert OrderNotInDisputableState(orderId);
         }
         if (msg.sender != order.buyer && msg.sender != order.farmer) {
@@ -408,6 +476,22 @@ contract AgriMarketplace is AccessControl, ReentrancyGuard, IERC721Receiver {
         order.disputeReasonHash = reasonHash;
 
         emit DisputeRaised(orderId, msg.sender, reasonHash);
+
+        // DAO case and escrow freeze are atomic: if DAO case creation fails,
+        // this transaction also rolls back the status change above.
+        IAgriDisputeDAO dao = disputeDAO;
+        if (address(dao) == address(0)) revert InvalidContractAddress();
+        dao.createDispute(orderId, order.buyer, order.farmer, oracleNode, reasonHash);
+    }
+
+    function setSupplyChainTracker(address tracker) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (tracker == address(0)) revert InvalidContractAddress();
+        supplyChainTracker = IAgriShipmentTracker(tracker);
+    }
+
+    function setDisputeDAO(address dao) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (dao == address(0)) revert InvalidContractAddress();
+        disputeDAO = IAgriDisputeDAO(dao);
     }
 
     /**

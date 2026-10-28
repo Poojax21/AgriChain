@@ -107,6 +107,7 @@ contract DisputeDAO is AccessControl, ReentrancyGuard {
     error AlreadyVoted(uint256 disputeId, address juror);
     error InsufficientJurorStake(address juror, uint256 currentStake, uint256 requiredStake);
     error InvalidVerdictChoice();
+    error OnlyMarketplace();
 
     /**
      * @notice Initializes the DisputeDAO contract.
@@ -143,7 +144,7 @@ contract DisputeDAO is AccessControl, ReentrancyGuard {
      * @param buyer Address of the buyer.
      * @param farmer Address of the farmer.
      * @param oracleNode Address of the AI oracle node that graded the batch (if applicable).
-     * @param evidenceHash IPFS keccak256 hash containing buyer/farmer claims and photographic proof.
+     * @param evidenceHash On-chain commitment to the dispute claim. Evidence files remain off-chain in this prototype.
      * @return disputeId The unique ID of the created dispute.
      */
     function createDispute(
@@ -153,6 +154,7 @@ contract DisputeDAO is AccessControl, ReentrancyGuard {
         address oracleNode,
         bytes32 evidenceHash
     ) external nonReentrant returns (uint256) {
+        if (msg.sender != address(marketplace)) revert OnlyMarketplace();
         if (orderDisputeId[orderId] != 0) {
             revert DisputeAlreadyExists(orderId);
         }

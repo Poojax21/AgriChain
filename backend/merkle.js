@@ -59,11 +59,14 @@ function buildMerkleTree(leaves) {
 
 /**
  * Hashes a single shipment checkpoint event into a 32-byte leaf hash.
+ * Geo/weather fields are part of the preimage when the reporter supplies
+ * them (empty string / -32768 sentinel otherwise), so telemetry is committed,
+ * not just displayed.
  */
-function hashCheckpoint(location, timestamp, temperatureCelsius, statusNote) {
+function hashCheckpoint(location, timestamp, temperatureCelsius, statusNote, latitude = "", longitude = "", weatherTempC = null) {
   return ethers.solidityPackedKeccak256(
-    ["string", "uint256", "int16", "string"],
-    [location, timestamp, temperatureCelsius, statusNote]
+    ["string", "uint256", "int16", "string", "string", "string", "int16"],
+    [location, timestamp, temperatureCelsius, statusNote, String(latitude ?? ""), String(longitude ?? ""), weatherTempC === null ? -32768 : Math.round(weatherTempC)]
   );
 }
 
