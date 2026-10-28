@@ -1,0 +1,41 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Hardhat
+contracts/artifacts/
+contracts/cache/
+contracts/coverage/
+contracts/coverage.json
+contracts/typechain/
+contracts/typechain-types/
+
+# Environment files
+.env
+.env.local
+*.env
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/dist/
+
+# Python & AI
+__pycache__/
+*.py[cod]
+*$py.class
+ai-service/venv/
+ai-service/.venv/
+ai-service/models/*.pth
+ai-service/models/*.pt
+ai-service/models/*.onnx
+
+# Database
+backend/*.sqlite
+backend/*.db
+
+# OS Files
+.DS_Store
+Thumbs.db
